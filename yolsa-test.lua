@@ -31,66 +31,85 @@ local ringColor    = DEFAULT_RING_COLOR
 local soundEnabled = true
 
 --////////////////////////////////////////////////////////////
---  Lift Cool-down  •  Sadece R tuşu, başka tuşlar sıfırlamaz
+--  Lift Cool-down • yalnızca R tuşu • etiket baş üstünde
 --////////////////////////////////////////////////////////////
 local COOLDOWN = 3
 local KEY      = Enum.KeyCode.R
 
-local Players = game:GetService("Players")
-local Run     = game:GetService("RunService")
-local UIS     = game:GetService("UserInputService")
-local lp      = Players.LocalPlayer
+local Players  = game:GetService("Players")
+local Run      = game:GetService("RunService")
+local UIS      = game:GetService("UserInputService")
+local lp       = Players.LocalPlayer
 
 ----------------------------------------------------------------
---  UI
+--  Etiket kurucu
 ----------------------------------------------------------------
-local gui = Instance.new("ScreenGui", lp.PlayerGui)
-gui.Name, gui.DisplayOrder = "LiftCD_GUI", 10000
+local function createTag(char)
+    local head = char:FindFirstChild("Head") or char:WaitForChild("HumanoidRootPart")
+    -- Mevcut etiket varsa sil
+    local old = head:FindFirstChild("LiftTag")
+    if old then old:Destroy() end
 
-local label = Instance.new("TextLabel", gui)
-label.AnchorPoint = Vector2.new(1,1)
-label.Position    = UDim2.new(1,-20,1,-60)
-label.Size        = UDim2.fromOffset(160,28)
-label.Font, label.TextScaled = Enum.Font.GothamBold, true
-label.BackgroundColor3 = Color3.fromRGB(40,120,40)
-label.TextColor3       = Color3.new(1,1,1)
-label.Text             = "Lift   •   Ready!"
-Instance.new("UICorner", label).CornerRadius = UDim.new(0,6)
+    local tag = Instance.new("BillboardGui", head)
+    tag.Name, tag.Adornee = "LiftTag", head
+    tag.Size, tag.AlwaysOnTop = UDim2.fromOffset(200,30), true
+    tag.StudsOffset = Vector3.new(0, 2.5, 0)
+
+    local lbl = Instance.new("TextLabel", tag)
+    lbl.Name, lbl.Size, lbl.BackgroundTransparency = "Lbl", UDim2.fromScale(1,1), 1
+    lbl.Font, lbl.TextScaled, lbl.TextColor3 = Enum.Font.GothamBold, true, Color3.new(1,1,1)
+    lbl.Text = "Lift   •   Ready!"
+
+    return lbl
+end
 
 ----------------------------------------------------------------
---  Sayaç
+--  Karakter yüklenince etiket hazırla
 ----------------------------------------------------------------
-local cd = 0
-local cooldownActive = false
+local label          -- TextLabel referansı
+local cd, active = 0, false
 
+local function onCharacter(char)
+    label = createTag(char)
+    cd, active = 0, false
+end
+if lp.Character then onCharacter(lp.Character) end
+lp.CharacterAdded:Connect(onCharacter)
+
+----------------------------------------------------------------
+--  Geri sayım
+----------------------------------------------------------------
 Run.RenderStepped:Connect(function(dt)
-    if cooldownActive then
+    if active and cd > 0 then
         cd -= dt
         if cd <= 0 then
-            cooldownActive = false
-            label.Text = "Lift   •   Ready!"
-            label.BackgroundColor3 = Color3.fromRGB(40,120,40)
+            active = false
+            cd     = 0
+            if label then
+                label.Text = "Lift   •   Ready!"
+                label.TextColor3 = Color3.fromRGB(0,255,0)
+            end
         else
-            label.Text = string.format("Lift   •   %.1f s", cd)
+            if label then
+                label.Text = string.format("Lift   •   %.1f s", cd)
+                label.TextColor3 = Color3.fromRGB(255,60,60)
+            end
         end
     end
 end)
 
 ----------------------------------------------------------------
---  R tuşu dinleyici
+--  R tuşu → CD başlat
 ----------------------------------------------------------------
 UIS.InputBegan:Connect(function(inp, gp)
-    if gp then return end                       -- oyun için işlenmiş ise pas
-    if inp.KeyCode ~= KEY then return end       -- sadece R
-    if cooldownActive then return end           -- CD çalışıyorsa pas
-
-    -- CD başlat
-    cooldownActive = true
-    cd = COOLDOWN
-    label.BackgroundColor3 = Color3.fromRGB(120,40,40)  -- kırmızı
-    label.Text = string.format("Lift   •   %.1f s", cd)
+    if gp or inp.KeyCode ~= KEY or active == true then return end
+    active = true
+    cd     = COOLDOWN
+    if label then
+        label.Text = string.format("Lift   •   %.1f s", cd)
+        label.TextColor3 = Color3.fromRGB(255,60,60)   -- kırmızı
+    end
 end)
-
 
 -- Dribble Remote hook (Lift tetikleyicisi)
 local DribbleRemote = RS:WaitForChild("Remotes"):WaitForChild("Ball"):WaitForChild("Dribble")
