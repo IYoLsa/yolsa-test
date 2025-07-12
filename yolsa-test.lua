@@ -1,38 +1,67 @@
---  Animation-Spy  –  Tackle animasyonu tespit + 3 s sayaç
-local COOLDOWN_TIME = 3       -- saniye, sabit tahmin
-local KEY = {"slide","tackle","dive"}
+--////////////////////////////////////////////////////////////
+--  Tackle Hız Ölçer v2  •  bildirim + chat fallback
+--////////////////////////////////////////////////////////////
+local INPUT_KEY      = Enum.KeyCode.F     -- tackle tuşu
+local SAMPLE_WINDOW  = 0.25               -- s, hız ölçüm süresi
+local TARGET_SAMPLES = 10                 -- kaç ölçümde ortalama?
+local SPEEDS         = {}                 -- tepe hızlar
 
-local Gui = game:GetService("StarterGui")
-local Players = game:GetService("Players")
+local Players  = game:GetService("Players")
+local RunSvc   = game:GetService("RunService")
+local UIS      = game:GetService("UserInputService")
+local GUI      = game:GetService("StarterGui")
+local lp       = Players.LocalPlayer
 
-local function ping(p, txt, ok)
-    Gui:SetCore("SendNotification",{
-        Title  = p.Name,
-        Text   = txt,
-        Duration = 2,
+-- Bildirim helper (fallback’li)
+local function say(txt, good)
+    local ok = pcall(GUI.SetCore, GUI, "SendNotification", {
+        Title    = good and "✓ Speed" or "✗ Speed",
+        Text     = txt,
+        Duration = 3
     })
+    if not ok then
+        GUI:SetCore("ChatMakeSystemMessage", {
+            Text  = "[Speed] "..txt,
+            Color = good and Color3.fromRGB(0,255,0) or Color3.fromRGB(255,60,60)
+        })
+    end
 end
 
-local function watchAnimator(char, plr)
-    local anim = char:FindFirstChildOfClass("Animator")
-    if not anim then return end
-    anim.AnimationPlayed:Connect(function(track)
-        local id = (track.Name or ""):lower()
-        for _,k in ipairs(KEY) do
-            if id:find(k) then
-                ping(plr, "Tackle!", false)
-                task.delay(COOLDOWN_TIME, function() ping(plr,"Ready!",true) end)
-                break
+-- Tek ölçüm
+local function measure()
+    local char = lp.Character
+    if not char then return end
+    local hrp  = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
+    local peak, t = 0, 0
+    local con; con = RunSvc.Heartbeat:Connect(function(dt)
+        t += dt
+        local v = hrp.Velocity
+        local horiz = Vector3.new(v.X,0,v.Z).Magnitude
+        if horiz > peak then peak = horiz end
+        if t >= SAMPLE_WINDOW then
+            con:Disconnect()
+            table.insert(SPEEDS, peak)
+            say(string.format("Ölçüm %d  •  %.1f stud/s", #SPEEDS, peak), false)
+
+            if #SPEEDS >= TARGET_SAMPLES then
+                local sum = 0
+                for _,s in ipairs(SPEEDS) do sum += s end
+                local avg = sum/#SPEEDS
+                say(string.format("≈ Önerilen eşik: %.1f stud/s", avg*0.9), true)
+                SPEEDS = {}  -- istersen yeniden ölçmek için sıfırla
             end
         end
     end)
 end
 
-local function hook(plr)
-    if plr.Character then watchAnimator(plr.Character, plr) end
-    plr.CharacterAdded:Connect(function(c) watchAnimator(c, plr) end)
-end
-for _,p in ipairs(Players:GetPlayers()) do hook(p) end
-Players.PlayerAdded:Connect(hook)
+-- Tuş dinle
+UIS.InputBegan:Connect(function(inp, gp)
+    if not gp and inp.KeyCode == INPUT_KEY then
+        measure()
+    end
+end)
 
-Gui:SetCore("SendNotification",{Title="Anim-Spy",Text="✓ Loaded",Duration=3})
+-- Başlangıç bildirimi (chat’e de düşecek)
+say("Ölçer yüklendi • F tuşuna bas, hız ölçülsün", true)
