@@ -14,7 +14,7 @@ local BAR_W, BAR_H       = 0.2, 0.05
 local BALL_MODEL, BALL_PART = "PLAIN_BALL", "HITBOX_BALL"
 
 local COOLDOWN_LIFT      = 3        -- R tuşu
-local COOLDOWN_TACKLE    = 3        -- F tuşu
+local COOLDOWN_TACKLE    = 4        -- F tuşu
 local KEY_LIFT           = Enum.KeyCode.R
 local KEY_TACKLE         = Enum.KeyCode.F
 
