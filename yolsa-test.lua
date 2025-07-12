@@ -31,109 +31,88 @@ local ringColor    = DEFAULT_RING_COLOR
 local soundEnabled = true
 
 --////////////////////////////////////////////////////////////
---  Lift Cool-down • yalnızca R tuşu • etiket baş üstünde
+--  Lift & Tackle Cool-down  •  Baş üstü çift sayaç
 --////////////////////////////////////////////////////////////
-local COOLDOWN = 3
-local KEY      = Enum.KeyCode.R
+local COOLDOWN_LIFT    = 3       -- R
+local COOLDOWN_TACKLE  = 4     -- F
+local KEY_LIFT         = Enum.KeyCode.R
+local KEY_TACKLE       = Enum.KeyCode.F
 
-local Players  = game:GetService("Players")
-local Run      = game:GetService("RunService")
-local UIS      = game:GetService("UserInputService")
-local lp       = Players.LocalPlayer
+local Players   = game:GetService("Players")
+local Run       = game:GetService("RunService")
+local UIS       = game:GetService("UserInputService")
+local lp        = Players.LocalPlayer
 
 ----------------------------------------------------------------
---  Etiket kurucu
+--  Etiket kur
 ----------------------------------------------------------------
-local function createTag(char)
+local tag, liftLbl, tackleLbl
+local function makeTag(char)
     local head = char:FindFirstChild("Head") or char:WaitForChild("HumanoidRootPart")
-    -- Mevcut etiket varsa sil
-    local old = head:FindFirstChild("LiftTag")
-    if old then old:Destroy() end
+    if tag then tag:Destroy() end
 
-    local tag = Instance.new("BillboardGui", head)
-    tag.Name, tag.Adornee = "LiftTag", head
-    tag.Size, tag.AlwaysOnTop = UDim2.fromOffset(200,30), true
-    tag.StudsOffset = Vector3.new(0, 2.5, 0)
+    tag = Instance.new("BillboardGui", head)
+    tag.Name, tag.Adornee, tag.AlwaysOnTop = "SkillCD_Tag", head, true
+    tag.Size, tag.StudsOffset = UDim2.fromOffset(200,42), Vector3.new(0,2.8,0)
 
-    local lbl = Instance.new("TextLabel", tag)
-    lbl.Name, lbl.Size, lbl.BackgroundTransparency = "Lbl", UDim2.fromScale(1,1), 1
-    lbl.Font, lbl.TextScaled, lbl.TextColor3 = Enum.Font.GothamBold, true, Color3.new(1,1,1)
-    lbl.Text = "Lift   •   Ready!"
-
-    return lbl
+    local function newLine(order, text)
+        local l = Instance.new("TextLabel", tag)
+        l.Size, l.Position = UDim2.fromScale(1,0.5), UDim2.fromScale(0,(order-1)*0.5)
+        l.BackgroundTransparency = 1
+        l.Font, l.TextScaled     = Enum.Font.GothamBold, true
+        l.Text                   = text
+        return l
+    end
+    liftLbl   = newLine(1, "Lift   •   Ready!")
+    tackleLbl = newLine(2, "Tackle •   Ready!")
 end
 
-----------------------------------------------------------------
---  Karakter yüklenince etiket hazırla
-----------------------------------------------------------------
-local label          -- TextLabel referansı
-local cd, active = 0, false
-
-local function onCharacter(char)
-    label = createTag(char)
-    cd, active = 0, false
-end
-if lp.Character then onCharacter(lp.Character) end
-lp.CharacterAdded:Connect(onCharacter)
+local function onChar(char) makeTag(char) end
+if lp.Character then onChar(lp.Character) end
+lp.CharacterAdded:Connect(onChar)
 
 ----------------------------------------------------------------
---  Geri sayım
+--  Sayaç değişkenleri
 ----------------------------------------------------------------
+local cdLift, cdTackle = 0, 0
+
 Run.RenderStepped:Connect(function(dt)
-    if active and cd > 0 then
-        cd -= dt
-        if cd <= 0 then
-            active = false
-            cd     = 0
-            if label then
-                label.Text = "Lift   •   Ready!"
-                label.TextColor3 = Color3.fromRGB(0,255,0)
-            end
+    if cdLift > 0 then
+        cdLift -= dt
+        if cdLift <= 0 then
+            cdLift = 0
+            liftLbl.Text, liftLbl.TextColor3 = "Lift   •   Ready!", Color3.fromRGB(0,255,0)
         else
-            if label then
-                label.Text = string.format("Lift   •   %.1f s", cd)
-                label.TextColor3 = Color3.fromRGB(255,60,60)
-            end
+            liftLbl.Text = string.format("Lift   •   %.1f s", cdLift)
+            liftLbl.TextColor3 = Color3.fromRGB(255,60,60)
+        end
+    end
+
+    if cdTackle > 0 then
+        cdTackle -= dt
+        if cdTackle <= 0 then
+            cdTackle = 0
+            tackleLbl.Text, tackleLbl.TextColor3 = "Tackle •   Ready!", Color3.fromRGB(0,255,0)
+        else
+            tackleLbl.Text = string.format("Tackle •   %.1f s", cdTackle)
+            tackleLbl.TextColor3 = Color3.fromRGB(255,60,60)
         end
     end
 end)
 
 ----------------------------------------------------------------
---  R tuşu → CD başlat
+--  Tuş dinleyicileri
 ----------------------------------------------------------------
-UIS.InputBegan:Connect(function(inp, gp)
-    if gp or inp.KeyCode ~= KEY or active == true then return end
-    active = true
-    cd     = COOLDOWN
-    if label then
-        label.Text = string.format("Lift   •   %.1f s", cd)
-        label.TextColor3 = Color3.fromRGB(255,60,60)   -- kırmızı
+UIS.InputBegan:Connect(function(inp, processed)
+    if processed then return end
+    if inp.KeyCode == KEY_LIFT and cdLift == 0 then
+        cdLift = COOLDOWN_LIFT
+        liftLbl.TextColor3 = Color3.fromRGB(255,60,60)
+    elseif inp.KeyCode == KEY_TACKLE and cdTackle == 0 then
+        cdTackle = COOLDOWN_TACKLE
+        tackleLbl.TextColor3 = Color3.fromRGB(255,60,60)
     end
 end)
-
--- Dribble Remote hook (Lift tetikleyicisi)
-local DribbleRemote = RS:WaitForChild("Remotes"):WaitForChild("Ball"):WaitForChild("Dribble")
-do
-    local mt = getrawmetatable(game)
-    local old = mt.__namecall
-    setreadonly(mt,false)
-    mt.__namecall = newcclosure(function(self,...)
-        local method = getnamecallmethod()
-        if self == DribbleRemote and method == "FireServer" then
-            -- Vektör argümanı y>0 ve bool true ise Lift hareketi
-            local args = {...}
-            local dir  = args[2]
-            local flag = args[3]
-            if typeof(dir)=="Vector3" and dir.Y > 0.5 and flag == true then
-                cdLeft = LIFT_COOLDOWN
-                cdLabel.BackgroundColor3 = Color3.fromRGB(120,40,40)
-                cdLabel.Text = string.format("Lift   •   %.1f s", cdLeft)
-            end
-        end
-        return old(self,...)
-    end)
-    setreadonly(mt,true)
-end
 
 --============================================================
 -- 1) GUI OLUŞUMU (sekmeli) ----------------------------------
