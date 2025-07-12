@@ -1,24 +1,38 @@
--- Remote-Spy Lite  –  “Tackle” kelimesi geçen paketleri bildirir
-local RS   = game:GetService("ReplicatedStorage")
-local Gui  = game:GetService("StarterGui")
+--  Animation-Spy  –  Tackle animasyonu tespit + 3 s sayaç
+local COOLDOWN_TIME = 3       -- saniye, sabit tahmin
+local KEY = {"slide","tackle","dive"}
 
-local function ping(txt)
-    Gui:SetCore("SendNotification",{Title="Remote",Text=txt,Duration=4})
+local Gui = game:GetService("StarterGui")
+local Players = game:GetService("Players")
+
+local function ping(p, txt, ok)
+    Gui:SetCore("SendNotification",{
+        Title  = p.Name,
+        Text   = txt,
+        Duration = 2,
+    })
 end
 
-for _,r in ipairs(RS:GetDescendants()) do
-    if r:IsA("RemoteEvent") then
-        r.OnClientEvent:Connect(function(...)
-            local data = table.concat(
-                table.pack(...),
-                " | ",
-                1,
-                select("#", ...)
-            )
-            if tostring(data):lower():find("tackle") then
-                ping("Remote → "..r.Name.." : "..data)
+local function watchAnimator(char, plr)
+    local anim = char:FindFirstChildOfClass("Animator")
+    if not anim then return end
+    anim.AnimationPlayed:Connect(function(track)
+        local id = (track.Name or ""):lower()
+        for _,k in ipairs(KEY) do
+            if id:find(k) then
+                ping(plr, "Tackle!", false)
+                task.delay(COOLDOWN_TIME, function() ping(plr,"Ready!",true) end)
+                break
             end
-        end)
-    end
+        end
+    end)
 end
-ping("Remote-Spy ✓ Listening")
+
+local function hook(plr)
+    if plr.Character then watchAnimator(plr.Character, plr) end
+    plr.CharacterAdded:Connect(function(c) watchAnimator(c, plr) end)
+end
+for _,p in ipairs(Players:GetPlayers()) do hook(p) end
+Players.PlayerAdded:Connect(hook)
+
+Gui:SetCore("SendNotification",{Title="Anim-Spy",Text="✓ Loaded",Duration=3})
