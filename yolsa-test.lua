@@ -1,270 +1,365 @@
 --============================================================
---  yolsa-test.lua  •  Neo Soccer League Hitbox GUI + Cooldowns + Rage
---  Fully self-contained; tested 2025-07-12
+--  Neo Soccer League • Exploit-Tarzı Sekmeli GUI + Kick-Hitbox
+--  + Lift & Tackle Cool-down Sayaçları (baş üstü)
+--  Tam LocalScript  —  2025-07-12
 --============================================================
 
--- ▶ SERVICES & CONSTS
-local Players    = game:GetService("Players")
-local RunS       = game:GetService("RunService")
-local UIS        = game:GetService("UserInputService")
-local lp         = Players.LocalPlayer
-
+--▼ AYARLAR ---------------------------------------------------
 local DEFAULT_RANGE      = 10.22
-local RAGE_RANGE         = 9999
-local RING_COLOR_DEFAULT = Color3.fromRGB(0,128,255)
-local ACCENT             = Color3.fromRGB(0,170,255)
+local DEFAULT_RING_COLOR = Color3.fromRGB(0,128,255)
+local ACCENT_COLOR       = Color3.fromRGB(0,170,255)
 local SOUND_ID           = "rbxassetid://541909867"
 
-local SEGMENTS  = 48
-local BAR_W,BAR_H = 0.2,0.05
-local BALL_MODEL  = "PLAIN_BALL"
-local BALL_PART   = "HITBOX_BALL"
+-- Cool-down
+local COOLDOWN_LIFT    = 3      -- R
+local COOLDOWN_TACKLE  = 4    -- F
+local KEY_LIFT         = Enum.KeyCode.R
+local KEY_TACKLE       = Enum.KeyCode.F
 
-local CD_LIFT,CD_TAC = 3, 4      -- seconds
-local KEY_LIFT,KEY_TAC = Enum.KeyCode.R, Enum.KeyCode.F
+local SEGMENTS         = 48
+local BAR_W, BAR_H     = 0.2, 0.05
+local BALL_MODEL, BALL_PART = "PLAIN_BALL", "HITBOX_BALL"
 
--- ▶ STATE
-local ringOn   = true
-local curRange = DEFAULT_RANGE
-local ringCol  = RING_COLOR_DEFAULT
-local sndOn    = true
-local rageOn   = false
+--▼ SERVİSLER -------------------------------------------------
+local Players      = game:GetService("Players")
+local RunService   = game:GetService("RunService")
+local UIS          = game:GetService("UserInputService")
+local lp           = Players.LocalPlayer
 
--- ▶ 1) HEAD-TAG COOLDOWNS
-local tagGui, liftLbl, tacLbl
-local cdLift, cdTac = 0, 0
+--▼ DURUM -----------------------------------------------------
+local ringEnabled  = true
+local currentRange = DEFAULT_RANGE
+local ringColor    = DEFAULT_RING_COLOR
+local soundEnabled = true
 
-local function newLine(parent,ord,txt)
-    local t = Instance.new("TextLabel", parent)
-    t.Size, t.Position = UDim2.fromScale(1,0.5), UDim2.fromScale(0,(ord-1)*0.5)
-    t.BackgroundTransparency, t.Font, t.TextScaled = 1, Enum.Font.GothamBold, true
-    t.TextColor3, t.Text = Color3.fromRGB(0,255,0), txt
-    return t
-end
+-- Cool-down durum
+local cdLift, cdTackle = 0, 0
+local liftLbl, tackleLbl
 
-local function makeTag(char)
-    local head = char:FindFirstChild("Head") or char:WaitForChild("HumanoidRootPart")
-    if tagGui then tagGui:Destroy() end
-    tagGui = Instance.new("BillboardGui", head)
-    tagGui.Name, tagGui.Size, tagGui.AlwaysOnTop = "SkillTag", UDim2.fromOffset(200,42), true
-    tagGui.StudsOffset = Vector3.new(0,2.8,0)
-    liftLbl = newLine(tagGui,1,"Lift   •   Ready!")
-    tacLbl  = newLine(tagGui,2,"Tackle •   Ready!")
-end
+--============================================================
+-- 1) GUI OLUŞUMU (sekme menülü) ------------------------------
+--============================================================
+local gui = Instance.new("ScreenGui", lp:WaitForChild("PlayerGui"))
+gui.Name, gui.ResetOnSpawn, gui.ZIndexBehavior =
+    "HitboxUI", false, Enum.ZIndexBehavior.Global
 
-local function onChar(c)
-    cdLift, cdTac = 0, 0
-    makeTag(c)
-end
-if lp.Character then onChar(lp.Character) end
-lp.CharacterAdded:Connect(onChar)
+--— PENCERE
+local window = Instance.new("Frame", gui)
+window.Size, window.Position = UDim2.fromOffset(420,280), UDim2.fromOffset(60,120)
+window.BackgroundColor3, window.BackgroundTransparency = Color3.fromRGB(25,25,25), 0.08
+window.BorderSizePixel = 0
+Instance.new("UICorner", window).CornerRadius = UDim.new(0,8)
 
-RunS.RenderStepped:Connect(function(dt)
-    if not rageOn then
-        if cdLift>0 then cdLift-=dt; 
-            if cdLift<=0 then cdLift=0; liftLbl.Text, liftLbl.TextColor3="Lift   •   Ready!",Color3.fromRGB(0,255,0)
-            else liftLbl.Text=("Lift   •   %.1f s"):format(cdLift); liftLbl.TextColor3=Color3.fromRGB(255,60,60)
-            end
+-- gölge
+local sh = Instance.new("ImageLabel", window)
+sh.Size, sh.Position = UDim2.new(1,14,1,14), UDim2.fromOffset(-7,-7)
+sh.Image, sh.ImageTransparency, sh.BackgroundTransparency =
+    "rbxassetid://1316045217", 0.7, 1
+sh.ScaleType, sh.SliceCenter, sh.ZIndex =
+    Enum.ScaleType.Slice, Rect.new(10,10,118,118), -1
+
+--— BAŞLIK BAR
+local titleBar = Instance.new("Frame", window)
+titleBar.Size = UDim2.new(1,0,0,30)
+titleBar.BackgroundColor3 = Color3.fromRGB(20,20,20)
+Instance.new("UICorner", titleBar).CornerRadius = UDim.new(0,8)
+
+local tLabel = Instance.new("TextLabel", titleBar)
+tLabel.Size, tLabel.Position = UDim2.new(1,-60,1,0), UDim2.fromOffset(10,0)
+tLabel.BackgroundTransparency, tLabel.TextXAlignment = 1, Enum.TextXAlignment.Left
+tLabel.Font, tLabel.TextSize, tLabel.TextColor3 =
+    Enum.Font.GothamBold, 18, ACCENT_COLOR
+tLabel.Text = "Neo Soccer • Hitbox GUI"
+
+local closeBtn = Instance.new("TextButton", titleBar)
+closeBtn.Size, closeBtn.Position =
+    UDim2.fromOffset(24,24), UDim2.fromScale(1,0)+UDim2.fromOffset(-32,3)
+closeBtn.Text, closeBtn.Font, closeBtn.TextSize =
+    "×", Enum.Font.GothamBlack, 22
+closeBtn.BackgroundTransparency, closeBtn.TextColor3 = 1, Color3.new(1,1,1)
+closeBtn.MouseButton1Click:Connect(function() window.Visible = not window.Visible end)
+
+-- sürükle
+do
+    local dragging, startPos, dragStart
+    titleBar.InputBegan:Connect(function(i)
+        if i.UserInputType==Enum.UserInputType.MouseButton1 then
+            dragging, dragStart, startPos = true, i.Position, window.Position
         end
-        if cdTac>0 then cdTac-=dt;
-            if cdTac<=0 then cdTac=0; tacLbl.Text, tacLbl.TextColor3="Tackle •   Ready!",Color3.fromRGB(0,255,0)
-            else tacLbl.Text=("Tackle •   %.1f s"):format(cdTac); tacLbl.TextColor3=Color3.fromRGB(255,60,60)
-            end
+    end)
+    titleBar.InputChanged:Connect(function(i)
+        if dragging and i.UserInputType==Enum.UserInputType.MouseMovement then
+            local delta = i.Position-dragStart
+            window.Position = UDim2.fromOffset(startPos.X.Offset+delta.X, startPos.Y.Offset+delta.Y)
         end
-    end
-end)
-
-UIS.InputBegan:Connect(function(i,gp)
-    if gp or rageOn then return end
-    if i.KeyCode==KEY_LIFT   and cdLift==0 then cdLift=CD_LIFT; liftLbl.TextColor3=Color3.fromRGB(255,60,60) end
-    if i.KeyCode==KEY_TAC and cdTac==0 then cdTac=CD_TAC;   tacLbl.TextColor3=Color3.fromRGB(255,60,60) end
-end)
-
--- ▶ 2) KICK HITBOX RING
-local function clearRing(hrp)
-    for _,p in ipairs(hrp:GetChildren()) do if p.Name=="KickSeg" then p:Destroy() end end
-end
-local function buildRing(hrp)
-    clearRing(hrp)
-    if not ringOn then return end
-    local r=-hrp.Size.Y/2+BAR_H/2+0.05
-    local step,ch = (2*math.pi)/SEGMENTS, 2*curRange*math.sin(math.pi/SEGMENTS)
-    for i=0,SEGMENTS-1 do
-        local th=i*step+step/2
-        local seg=Instance.new("Part")
-        seg.Name,seg.Size= "KickSeg", Vector3.new(ch,BAR_H,BAR_W)
-        seg.Color,seg.Transparency,seg.Material= ringCol,0.25,Enum.Material.Neon
-        seg.Anchored,seg.CanCollide,seg.Massless=false,false,true
-        seg.CFrame=hrp.CFrame*CFrame.new(math.cos(th)*curRange,r,math.sin(th)*curRange)*CFrame.Angles(0,-th,0)
-        seg.Parent=hrp
-        local w=Instance.new("WeldConstraint",seg); w.Part0,w.Part1=hrp,seg
-    end
+    end)
+    titleBar.InputEnded:Connect(function(i)
+        if i.UserInputType==Enum.UserInputType.MouseButton1 then dragging=false end
+    end)
 end
 
--- ▶ 3) GUI
-local function mkBtn(text,h)
-    local b=Instance.new("TextButton")
-    b.Size, b.Text, b.Font, b.TextSize = UDim2.fromOffset(220,h or 30), text, Enum.Font.GothamMedium,16
-    b.TextColor3,b.BackgroundColor3=Color3.new(1,1,1),Color3.fromRGB(40,40,40)
-    Instance.new("UICorner",b).CornerRadius=UDim.new(0,6)
-    Instance.new("UIStroke",b).Color=Color3.fromRGB(60,60,60)
+--— YAN SEKME ÇUBUĞU
+local side = Instance.new("Frame", window)
+side.Size, side.Position = UDim2.new(0,90,1,-30), UDim2.fromOffset(0,30)
+side.BackgroundColor3 = Color3.fromRGB(20,20,20)
+Instance.new("UICorner", side).CornerRadius = UDim.new(0,8)
+
+local tabList = Instance.new("UIListLayout", side)
+tabList.Padding = UDim.new(0,6)
+tabList.FillDirection, tabList.HorizontalAlignment =
+    Enum.FillDirection.Vertical, Enum.HorizontalAlignment.Center
+tabList.VerticalAlignment, tabList.SortOrder =
+    Enum.VerticalAlignment.Top, Enum.SortOrder.LayoutOrder
+
+local pages, currentPage = {}, nil
+local function makeTab(name, icon, order)
+    local btn = Instance.new("TextButton", side)
+    btn.LayoutOrder, btn.Size = order, UDim2.fromOffset(70,30)
+    btn.Text, btn.Font, btn.TextSize = icon.."  "..name, Enum.Font.GothamMedium, 15
+    btn.TextColor3, btn.BackgroundColor3 = Color3.new(1,1,1), Color3.fromRGB(35,35,35)
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0,6)
+
+    local page = Instance.new("Frame", window)
+    page.Visible, page.BackgroundTransparency = false, 1
+    page.Size, page.Position = UDim2.new(1,-100,1,-40), UDim2.fromOffset(100,40)
+    pages[name] = page
+
+    btn.MouseButton1Click:Connect(function()
+        if currentPage then currentPage.Visible=false end
+        currentPage=page; page.Visible=true
+        for _,b in ipairs(side:GetChildren()) do
+            if b:IsA("TextButton") then b.BackgroundColor3=Color3.fromRGB(35,35,35) end
+        end
+        btn.BackgroundColor3 = ACCENT_COLOR
+    end)
+    return page
+end
+
+local generalPage = makeTab("General","⚙",1)
+local colorPage   = makeTab("Colors","🎨",2)
+local audioPage   = makeTab("Audio","🔊",3)
+task.defer(function() side:GetChildren()[1]:FindFirstChildOfClass("TextButton"):Activate() end)
+
+--▼ Yardımcı UI oluşturucular
+local function mkButton(text,h)
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.fromOffset(220,h or 30)
+    b.Text, b.Font, b.TextSize = text, Enum.Font.GothamMedium, 16
+    b.TextColor3, b.BackgroundColor3 = Color3.new(1,1,1), Color3.fromRGB(40,40,40)
+    Instance.new("UICorner", b).CornerRadius = UDim.new(0,6)
+    Instance.new("UIStroke", b).Color = Color3.fromRGB(60,60,60)
     return b
 end
 local function mkInput(def)
-    local t=Instance.new("TextBox")
-    t.Size, t.Text, t.Font, t.TextSize = UDim2.fromOffset(220,28), def, Enum.Font.Gotham,15
-    t.BackgroundColor3,t.TextColor3=Color3.fromRGB(40,40,40),Color3.new(1,1,1)
-    t.ClearTextOnFocus=false
-    Instance.new("UICorner",t).CornerRadius=UDim.new(0,6)
-    Instance.new("UIStroke",t).Color=Color3.fromRGB(60,60,60)
-    return t
+    local i = Instance.new("TextBox")
+    i.Size = UDim2.fromOffset(220,28)
+    i.Text, i.Font, i.TextSize = def, Enum.Font.Gotham, 15
+    i.BackgroundColor3, i.TextColor3 = Color3.fromRGB(40,40,40), Color3.new(1,1,1)
+    i.ClearTextOnFocus = false
+    Instance.new("UICorner", i).CornerRadius = UDim.new(0,6)
+    Instance.new("UIStroke", i).Color = Color3.fromRGB(60,60,60)
+    return i
 end
 
-local gui = Instance.new("ScreenGui", lp.PlayerGui)
-gui.Name, gui.ResetOnSpawn, gui.ZIndexBehavior = "HitboxUI", false, Enum.ZIndexBehavior.Global
+-- Genel sekme
+local gList = Instance.new("UIListLayout", generalPage)
+gList.Padding = UDim.new(0,4); gList.HorizontalAlignment = Enum.HorizontalAlignment.Center
 
-local win = Instance.new("Frame", gui)
-win.Size, win.Position = UDim2.fromOffset(420,280), UDim2.fromOffset(60,120)
-win.BackgroundColor3, win.BackgroundTransparency = Color3.fromRGB(25,25,25),0.08
-win.BorderSizePixel=0; Instance.new("UICorner",win).CornerRadius=UDim.new(0,8)
+local ringToggle = mkButton("Ring: ON"); ringToggle.Parent = generalPage
+local rangeInput = mkInput(tostring(currentRange)); rangeInput.Parent = generalPage
+local applyBtn   = mkButton("Apply",24); applyBtn.Parent = generalPage
+local resetBtn   = mkButton("Reset",24); resetBtn.Parent = generalPage
 
--- shadow
-local sh=Instance.new("ImageLabel",win)
-sh.Size,sh.Position=UDim2.new(1,14,1,14),UDim2.fromOffset(-7,-7)
-sh.Image,sh.ImageTransparency="rbxassetid://1316045217",0.7
-sh.BackgroundTransparency,sh.ZIndex=1,-1
-sh.ScaleType,sh.SliceCenter=Enum.ScaleType.Slice,Rect.new(10,10,118,118)
-
--- title bar
-local bar=Instance.new("Frame",win)
-bar.Size,bar.BackgroundColor3=UDim2.new(1,0,0,30),Color3.fromRGB(20,20,20)
-Instance.new("UICorner",bar).CornerRadius=UDim.new(0,8)
-local ttl=Instance.new("TextLabel",bar)
-ttl.Size,ttl.Position=UDim2.new(1,-60,1,0),UDim2.fromOffset(10,0)
-ttl.BackgroundTransparency=1; ttl.Font=Enum.Font.GothamBold; ttl.TextSize=18
-ttl.TextXAlignment,ttl.TextColor3=Enum.TextXAlignment.Left,ACCENT
-ttl.Text="Neo Soccer • Hitbox GUI"
-local close=Instance.new("TextButton",bar)
-close.Size,close.Position=UDim2.fromOffset(24,24),UDim2.fromScale(1,0)+UDim2.fromOffset(-32,3)
-close.Text,close.Font,close.TextSize="×",Enum.Font.GothamBlack,22
-close.BackgroundTransparency,close.TextColor3=1,Color3.new(1,1,1)
-close.MouseButton1Click:Connect(function() win.Visible=not win.Visible end)
-
--- draggable
-do local d,st,pos
-    bar.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 then d=true; st=i.Position; pos=win.Position end end)
-    bar.InputChanged:Connect(function(i) if d and i.UserInputType==Enum.UserInputType.MouseMovement then 
-        local diff=i.Position-st; win.Position=UDim2.fromOffset(pos.X.Offset+diff.X,pos.Y.Offset+diff.Y) end end)
-    bar.InputEnded:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 then d=false end end)
-end
-
--- side tabs
-local side=Instance.new("Frame",win)
-side.Size,side.Position=UDim2.new(0,90,1,-30),UDim2.fromOffset(0,30)
-side.BackgroundColor3=Color3.fromRGB(20,20,20)
-Instance.new("UICorner",side).CornerRadius=UDim.new(0,8)
-local layout=Instance.new("UIListLayout",side)
-layout.Padding,layout.FillDirection=UDim.new(0,6),Enum.FillDirection.Vertical
-layout.HorizontalAlignment,layout.VerticalAlignment=Enum.HorizontalAlignment.Center,Enum.VerticalAlignment.Top
-
-local pages, currentPage = {}, nil
-local function addTab(name,icon,order)
-    local b=Instance.new("TextButton",side)
-    b.LayoutOrder,b.Size=order,UDim2.fromOffset(70,30)
-    b.Text=icon.."  "..name; b.Font=Enum.Font.GothamMedium; b.TextSize=15
-    b.TextColor3,b.BackgroundColor3=Color3.new(1,1,1),Color3.fromRGB(35,35,35)
-    Instance.new("UICorner",b).CornerRadius=UDim.new(0,6)
-    local pg=Instance.new("Frame",win)
-    pg.Size,pg.Position=UDim2.new(1,-100,1,-40),UDim2.fromOffset(100,40)
-    pg.BackgroundTransparency,pg.Visible=1,false
-    pages[name]=pg
-    b.MouseButton1Click:Connect(function()
-        if currentPage then currentPage.Visible=false end
-        currentPage=pg; pg.Visible=true
-        for _,x in ipairs(side:GetChildren()) do
-            if x:IsA("TextButton") then x.BackgroundColor3=Color3.fromRGB(35,35,35) end
-        end
-        b.BackgroundColor3=ACCENT
-    end)
-    return pg
-end
-
-local general = addTab("General","⚙",1)
-local colours = addTab("Colors","🎨",2)
-local audio   = addTab("Audio","🔊",3)
-task.defer(function() side:GetChildren()[1]:FindFirstChildOfClass("TextButton"):Activate() end)
-
--- General tab content
-local gl=Instance.new("UIListLayout",general)
-gl.Padding,gl.HorizontalAlignment=UDim.new(0,4),Enum.HorizontalAlignment.Center
-local ringBtn = mkBtn("Ring: ON");       ringBtn.Parent=general
-local rangeBox= mkInput(tostring(curRange)); rangeBox.Parent=general
-local applyBtn= mkBtn("Apply",24);       applyBtn.Parent=general
-local rageBtn = mkBtn("Rage: OFF",24);   rageBtn.Parent=general
-local resetBtn= mkBtn("Reset",24);       resetBtn.Parent=general
-
--- Colours tab content
-local colLay=Instance.new("UIGridLayout",colours)
-colLay.CellPadding,colLay.CellSize=UDim2.fromOffset(6,6),UDim2.fromOffset(60,28)
-for _,opt in ipairs({{"Blue",Color3.fromRGB(0,128,255)},{"Green",Color3.fromRGB(0,255,0)},{"Red",Color3.fromRGB(255,70,70)}}) do
-    local b=mkBtn(opt[1],24); b.BackgroundColor3=opt[2]; b.Parent=colours
-    b.MouseButton1Click:Connect(function()
-        ringCol=opt[2]; local hrp=lp.Character and lp.Character:FindFirstChild("HumanoidRootPart")
+-- Colors sekmesi
+local colors = {
+    {"Blue",  Color3.fromRGB(0,128,255)},
+    {"Green", Color3.fromRGB(0,255,0)},
+    {"Red",   Color3.fromRGB(255,70,70)},
+}
+local colGrid = Instance.new("UIGridLayout", colorPage)
+colGrid.CellPadding, colGrid.CellSize = UDim2.fromOffset(6,6), UDim2.fromOffset(60,28)
+for _,c in ipairs(colors) do
+    local but = mkButton(c[1],24); but.BackgroundColor3=c[2]; but.Parent=colorPage
+    but.MouseButton1Click:Connect(function()
+        ringColor=c[2]; local hrp=lp.Character and lp.Character:FindFirstChild("HumanoidRootPart")
         if hrp then buildRing(hrp) end
     end)
 end
 
--- Audio tab
-local audBtn=mkBtn("Sound: ON"); audBtn.Parent=audio
+-- Audio sekmesi
+local audToggle = mkButton("Sound: ON"); audToggle.Parent = audioPage
 
--- Buttons
-ringBtn.MouseButton1Click:Connect(function()
-    ringOn=not ringOn; ringBtn.Text="Ring: "..(ringOn and "ON" or "OFF")
-    local hrp=lp.Character and lp.Character:FindFirstChild("HumanoidRootPart"); if hrp then (ringOn and buildRing or clearRing)(hrp) end
-end)
-applyBtn.MouseButton1Click:Connect(function()
-    local v=tonumber(rangeBox.Text); if v and v>0 then curRange=v end
-    local hrp=lp.Character and lp.Character:FindFirstChild("HumanoidRootPart"); if hrp then buildRing(hrp) end
-end)
-audBtn.MouseButton1Click:Connect(function()
-    sndOn=not sndOn; audBtn.Text="Sound: "..(sndOn and "ON" or "OFF")
-end)
-resetBtn.MouseButton1Click:Connect(function()
-    rageOn=false; ringOn=true; curRange=DEFAULT_RANGE; ringCol=RING_COLOR_DEFAULT; sndOn=true
-    ringBtn.Text="Ring: ON"; audBtn.Text="Sound: ON"; rageBtn.Text="Rage: OFF"; rangeBox.Text=tostring(curRange)
-    cdLift,cdTac=0,0; liftLbl.Text="Lift   •   Ready!"; tacLbl.Text="Tackle •   Ready!"; liftLbl.TextColor3=tacLbl.TextColor3=Color3.fromRGB(0,255,0)
-    local hrp=lp.Character and lp.Character:FindFirstChild("HumanoidRootPart"); if hrp then buildRing(hrp) end
-end)
-rageBtn.MouseButton1Click:Connect(function() rageOn=not rageOn; rageBtn.Text="Rage: "..(rageOn and "ON" or "OFF")
-    curRange=rageOn and RAGE_RANGE or DEFAULT_RANGE; cdLift,cdTac=0,0
-    liftLbl.Text="Lift   •   Ready!"; tacLbl.Text="Tackle •   Ready!"; liftLbl.TextColor3=tacLbl.TextColor3=Color3.fromRGB(0,255,0)
-    local hrp=lp.Character and lp.Character:FindFirstChild("HumanoidRootPart"); if hrp then buildRing(hrp) end
-end)
-
--- ▶ 4) BALL REACH + SOUND
-local function reachLabel(ball)
-    local g=ball:FindFirstChild("ReachGui") or Instance.new("BillboardGui",ball)
-    g.Name,g.Size,g.AlwaysOnTop="ReachGui",UDim2.fromOffset(130,34),true; g.StudsOffset=Vector3.new(0,ball.Size.Y/2+1.8,0)
-    local l=g:FindFirstChild("Lbl") or Instance.new("TextLabel",g)
-    l.Name,l.Size,l.BackgroundTransparency="Lbl",UDim2.fromScale(1,1),1
-    l.Font,l.TextScaled,l.TextStrokeTransparency=Enum.Font.GothamBold,true,0.7; return l
+--============================================================
+-- 2) Halka & Yardımcı Fonksiyonlar --------------------------
+--============================================================
+local function clearRing(hrp)
+    for _,p in ipairs(hrp:GetChildren()) do
+        if p.Name=="KickSeg" then p:Destroy() end
+    end
 end
 
-local function charInit(c)
-    local hrp=c:WaitForChild("HumanoidRootPart"); buildRing(hrp)
-    local snd=hrp:FindFirstChild("KickSnd") or Instance.new("Sound",hrp)
-    snd.Name,snd.SoundId,snd.Volume="KickSnd",SOUND_ID,1
+function buildRing(hrp)
+    clearRing(hrp); if not ringEnabled then return end
+    local y = -hrp.Size.Y/2 + BAR_H/2 + 0.05
+    local step, chord = (2*math.pi)/SEGMENTS, 2*currentRange*math.sin(math.pi/SEGMENTS)
+
+    for i=0, SEGMENTS-1 do
+        local th = i*step + step/2
+        local seg = Instance.new("Part")
+        seg.Name, seg.Size = "KickSeg", Vector3.new(chord,BAR_H,BAR_W)
+        seg.Color, seg.Transparency, seg.Material = ringColor,0.25,Enum.Material.Neon
+        seg.Anchored, seg.CanCollide, seg.Massless = false,false,true
+        seg.CFrame = hrp.CFrame * CFrame.new(math.cos(th)*currentRange,y,math.sin(th)*currentRange)
+                     * CFrame.Angles(0,-th,0)
+        seg.Parent = hrp
+        local weld = Instance.new("WeldConstraint", seg)
+        weld.Part0, weld.Part1 = hrp, seg
+    end
+end
+
+local function getSound(hrp)
+    local s = hrp:FindFirstChild("KickSnd") or Instance.new("Sound", hrp)
+    s.Name, s.SoundId, s.Volume = "KickSnd", SOUND_ID, 1
+    return s
+end
+
+local function getLabel(ball)
+    local gui = ball:FindFirstChild("ReachGui") or Instance.new("BillboardGui", ball)
+    gui.Name, gui.Size, gui.AlwaysOnTop = "ReachGui", UDim2.fromOffset(130,34), true
+    gui.StudsOffset = Vector3.new(0, ball.Size.Y/2 + 1.8, 0)
+    local lbl = gui:FindFirstChild("Lbl") or Instance.new("TextLabel", gui)
+    lbl.Name, lbl.Size, lbl.BackgroundTransparency = "Lbl", UDim2.fromScale(1,1),1
+    lbl.Font, lbl.TextScaled, lbl.TextStrokeTransparency = Enum.Font.GothamBold, true,0.7
+    return lbl
+end
+
+--============================================================
+-- 3) Cool-down Tag Fonksiyonları -----------------------------
+--============================================================
+local function makeTag(char)
+    local head = char:FindFirstChild("Head") or char:WaitForChild("HumanoidRootPart")
+    local old = head:FindFirstChild("SkillCD_Tag")
+    if old then old:Destroy() end
+
+    local tag = Instance.new("BillboardGui", head)
+    tag.Name, tag.Adornee, tag.AlwaysOnTop = "SkillCD_Tag", head, true
+    tag.Size, tag.StudsOffset = UDim2.fromOffset(200,42), Vector3.new(0,2.8,0)
+
+    local function newLine(order,text)
+        local l = Instance.new("TextLabel", tag)
+        l.Size, l.Position = UDim2.fromScale(1,0.5), UDim2.fromScale(0,(order-1)*0.5)
+        l.BackgroundTransparency = 1
+        l.Font, l.TextScaled = Enum.Font.GothamBold, true
+        l.Text = text
+        return l
+    end
+    liftLbl   = newLine(1,"Lift   •   Ready!")
+    tackleLbl = newLine(2,"Tackle •   Ready!")
+end
+
+--============================================================
+-- 4) UI BUTON OLAYLARI --------------------------------------
+--============================================================
+ringToggle.MouseButton1Click:Connect(function()
+    ringEnabled = not ringEnabled
+    ringToggle.Text = "Ring: "..(ringEnabled and "ON" or "OFF")
+    local hrp = lp.Character and lp.Character:FindFirstChild("HumanoidRootPart")
+    if hrp then (ringEnabled and buildRing or clearRing)(hrp) end
+end)
+
+applyBtn.MouseButton1Click:Connect(function()
+    local v=tonumber(rangeInput.Text); if v and v>0 then currentRange=v end
+    local hrp=lp.Character and lp.Character:FindFirstChild("HumanoidRootPart")
+    if hrp then buildRing(hrp) end
+end)
+
+audToggle.MouseButton1Click:Connect(function()
+    soundEnabled = not soundEnabled
+    audToggle.Text = "Sound: "..(soundEnabled and "ON" or "OFF")
+end)
+
+resetBtn.MouseButton1Click:Connect(function()
+    ringEnabled, currentRange, ringColor, soundEnabled =
+        true, DEFAULT_RANGE, DEFAULT_RING_COLOR, true
+    ringToggle.Text, audToggle.Text, rangeInput.Text =
+        "Ring: ON", "Sound: ON", tostring(currentRange)
+    local hrp = lp.Character and lp.Character:FindFirstChild("HumanoidRootPart")
+    if hrp then buildRing(hrp) end
+end)
+
+--============================================================
+-- 5) KARAKTER & TOP TAKİBİ ----------------------------------
+--============================================================
+local function onChar(char)
+    local hrp = char:WaitForChild("HumanoidRootPart")
+    buildRing(hrp)
+    makeTag(char)
+    cdLift, cdTackle = 0,0
+    local beep, prev = getSound(hrp), false
+
     task.spawn(function()
-        local ball repeat
-            local m=workspace:FindFirstChild(BALL_MODEL,true); ball=m and m:FindFirstChild(BALL_PART,true); task.wait(0.25)
+        local ball
+        repeat
+            local model=workspace:FindFirstChild(BALL_MODEL,true)
+            ball=model and model:FindFirstChild(BALL_PART,true)
+            task.wait(0.2)
         until ball and ball:IsA("BasePart")
-        local lbl=reachLabel(ball); local prev=false
+
+        local lbl=getLabel(ball)
+
         RunService.Heartbeat:Connect(function()
-            local inside=(ball.Position-hrp.Position).Magnitude<=curRange
-            if inside and not prev and sndOn then snd:Play() end; prev=inside
-            lbl.Text=inside and "Reachable" or "Unreachable!"; lbl.TextColor3=inside and Color3.fromRGB(0,255,0) or Color3.fromRGB(255,60,60)
+            local inside=(ball.Position-hrp.Position).Magnitude<=currentRange
+            if inside and not prev and soundEnabled then beep:Play() end
+            prev=inside
+            lbl.Text = inside and "Reachable" or "Unreachable!"
+            lbl.TextColor3 = inside and Color3.new(0,1,0) or Color3.new(1,0,0)
         end)
     end)
 end
-if lp.Character then charInit(lp.Character) end
-lp.CharacterAdded:Connect(charInit)
+if lp.Character then onChar(lp.Character) end
+lp.CharacterAdded:Connect(onChar)
+
+--============================================================
+-- 6) Cool-down Sayaç Mantığı ---------------------------------
+--============================================================
+RunService.RenderStepped:Connect(function(dt)
+    if liftLbl and cdLift then
+        if cdLift > 0 then
+            cdLift -= dt
+            if cdLift <= 0 then
+                cdLift = 0
+                liftLbl.Text, liftLbl.TextColor3 = "Lift   •   Ready!", Color3.fromRGB(0,255,0)
+            else
+                liftLbl.Text = string.format("Lift   •   %.1f s", cdLift)
+                liftLbl.TextColor3 = Color3.fromRGB(255,60,60)
+            end
+        end
+    end
+
+    if tackleLbl and cdTackle then
+        if cdTackle > 0 then
+            cdTackle -= dt
+            if cdTackle <= 0 then
+                cdTackle = 0
+                tackleLbl.Text, tackleLbl.TextColor3 = "Tackle •   Ready!", Color3.fromRGB(0,255,0)
+            else
+                tackleLbl.Text = string.format("Tackle •   %.1f s", cdTackle)
+                tackleLbl.TextColor3 = Color3.fromRGB(255,60,60)
+            end
+        end
+    end
+end)
+
+--============================================================
+-- 7) Tuş Dinleyicileri --------------------------------------
+--============================================================
+UIS.InputBegan:Connect(function(inp, processed)
+    if processed then return end
+    if inp.KeyCode == KEY_LIFT and cdLift == 0 then
+        cdLift = COOLDOWN_LIFT
+        if liftLbl then liftLbl.TextColor3 = Color3.fromRGB(255,60,60) end
+    elseif inp.KeyCode == KEY_TACKLE and cdTackle == 0 then
+        cdTackle = COOLDOWN_TACKLE
+        if tackleLbl then tackleLbl.TextColor3 = Color3.fromRGB(255,60,60) end
+    end
+end)
